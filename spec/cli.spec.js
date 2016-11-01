@@ -804,21 +804,6 @@ describe('Cli', function() {
     });
   });
 
-  describe('processExit method', function() {
-  });
-
-  describe('gatherInfo method', function() {
-    it('should return an object and gather info from Info function from app-lib', function() {
-      spyOn(Info, 'gatherInfo').andReturn({});
-      spyOn(Info, 'getIonicVersion');
-      spyOn(Info, 'getIonicCliVersion');
-
-      var info = IonicCli.gatherInfo();
-
-      expect(info).toEqual(jasmine.any(Object));
-    });
-  });
-
   describe('printVersionWarning method', function() {
     it('should write out a warning if the version is not equal to version specified by the cli', function() {
       spyOn(log, 'warn');

@@ -5,7 +5,9 @@ var rewire = require('rewire');
 var IonicStats = rewire('../../lib/utils/stats');
 var IonicInfoModule = rewire('ionic-app-lib').info;
 var IonicAppLib = require('ionic-app-lib');
+var IonicConfig = IonicAppLib.config;
 var log = IonicAppLib.logging.logger;
+var Q = require('q');
 
 describe('Stats', function() {
 
@@ -24,7 +26,7 @@ describe('Stats', function() {
       process.argv = oldprocessargv;
     });
 
-    it('should not track if process.argv is less than 3', function() {
+    it('should not track if process.argv is less than 3', function(done) {
       process.argv = ['node', 'bin/ionic'];
 
       var mpSpy = jasmine.createSpy('mpSpy');
@@ -35,57 +37,56 @@ describe('Stats', function() {
 
       var revertConfig = IonicStats.__set__('ionicConfig', configSpy);
 
-      IonicStats.t();
-
-      expect(configSpy.get).not.toHaveBeenCalled();
-      expect(mpSpy).not.toHaveBeenCalled();
-      revertMpSpy();
-      revertConfig();
-    });
-
-    it('should not track stats if opted out', function() {
-      process.argv = ['node', 'bin/ionic', 'start', 'foldername'];
-
-      var mpSpy = jasmine.createSpy('mpSpy');
-      var revertMpSpy = IonicStats.__set__('mp', mpSpy);
-
-      var configSpy = jasmine.createSpyObj('ionicConfig', ['get']);
-      configSpy.get.andReturn(true);
-
-      var revertConfig = IonicStats.__set__('ionicConfig', configSpy);
-
-      IonicStats.t();
-
-      expect(configSpy.get).toHaveBeenCalled();
-      expect(mpSpy).not.toHaveBeenCalled();
-      revertMpSpy();
-      revertConfig();
-    });
-
-    it('should catch errors thrown mp', function() {
-      process.argv = ['node', 'bin/ionic', 'start', 'foldername'];
-
-      spyOn(log, 'error');
-      var configSpy = jasmine.createSpyObj('ionicConfig', ['get']);
-
-      configSpy.get.andCallFake(function() {
-        throw new Error('Fake Error');
+      IonicStats.t().then(function() {
+        expect(configSpy.get).not.toHaveBeenCalled();
+        expect(mpSpy).not.toHaveBeenCalled();
+        revertMpSpy();
+        revertConfig();
+        done();
       });
+    });
+
+    it('should not track stats if opted out', function(done) {
+      process.argv = ['node', 'bin/ionic', 'start', 'foldername'];
 
       var mpSpy = jasmine.createSpy('mpSpy');
       var revertMpSpy = IonicStats.__set__('mp', mpSpy);
-      var revertConfig = IonicStats.__set__('ionicConfig', configSpy);
 
-      IonicStats.t();
+      var config = {
+        get: function() { return true; }
+      };
 
-      expect(configSpy.get).toHaveBeenCalled();
-      expect(mpSpy).not.toHaveBeenCalled();
-      expect(log.error).toHaveBeenCalled();
-      revertMpSpy();
-      revertConfig();
+      spyOn(IonicConfig, 'promiseLoad').andReturn(Q(config));
+
+      IonicStats.t().then(function() {
+        expect(mpSpy).not.toHaveBeenCalled();
+        revertMpSpy();
+        done();
+      });
     });
 
-    it('should track the correct command', function() {
+    it('should catch errors thrown', function(done) {
+      process.argv = ['node', 'bin/ionic', 'start', 'foldername'];
+
+      var mpSpy = jasmine.createSpy('mpSpy');
+      var revertMpSpy = IonicStats.__set__('mp', mpSpy);
+      var err = new Error('Fake Error');
+
+      var config = {
+        get: function() { throw err; }
+      };
+
+      spyOn(IonicConfig, 'promiseLoad').andReturn(Q(config));
+
+      IonicStats.t().catch(function(e) {
+        expect(mpSpy).not.toHaveBeenCalled();
+        expect(e).toEqual(err);
+        revertMpSpy();
+        done();
+      });
+    });
+
+    it('should track the correct command', function(done) {
       process.argv = ['node', 'bin/ionic', 'update', 'foldername', '-w', 'android', 'ios'];
 
       spyOn(fs, 'readFileSync').andReturn('{ "version": "2.0.0-beta.25" }');
@@ -93,42 +94,35 @@ describe('Stats', function() {
       var mpSpy = jasmine.createSpy('mpSpy');
       var revertMpSpy = IonicStats.__set__('mp', mpSpy);
 
-      spyOn(IonicInfoModule, 'getNodeVersion');
-      spyOn(IonicInfoModule, 'getOsEnvironment');
-      spyOn(IonicInfoModule, 'gatherGulpInfo').andCallFake(function(info) {
-        info.os = 'Mac OS X El Capitan';
-        info.node = 'v5.10.1';
-        info.gulp = 'v3.0.0';
-      });
-
-      var configSpy = jasmine.createSpyObj('ionicConfig', ['get']);
-      configSpy.get.andReturn(false);
-
-      var revertConfig = IonicStats.__set__('ionicConfig', configSpy);
-
-      IonicStats.t();
-
-      expect(mpSpy).toHaveBeenCalledWith('update', {
+      spyOn(IonicInfoModule, 'gatherInfo').andReturn(Q({
         ionic_version: '2.0.0-beta.25', // eslint-disable-line camelcase
         cli_version: '2.0.0-beta.25', // eslint-disable-line camelcase
-        email: false,
-        account_id: false, // eslint-disable-line camelcase
-        /*
         os: 'Mac OS X El Capitan',
-        gulp: 'v3.0.0',
-        node: 'v5.10.1',
-        */
-        cli_release_tag: 'beta', // eslint-disable-line camelcase
-        '--no-cordova': true,
-        android: true,
-        ios: true,
-        platform: 'android,ios'
+        node: 'v5.10.1'
+      }));
+
+      var config = {
+        get: function() { return false; }
+      };
+
+      spyOn(IonicConfig, 'promiseLoad').andReturn(Q(config));
+
+      IonicStats.t().then(function() {
+        expect(mpSpy).toHaveBeenCalledWith('update', {
+          email: false,
+          account_id: false, // eslint-disable-line camelcase
+          cli_release_tag: 'beta', // eslint-disable-line camelcase
+          '--no-cordova': true,
+          android: true,
+          ios: true,
+          platform: 'android,ios'
+        });
+        revertMpSpy();
+        done();
       });
-      revertMpSpy();
-      revertConfig();
     });
 
-    it('should track the correct command with no platforms or releaseTags', function() {
+    it('should track the correct command with no platforms or releaseTags', function(done) {
       process.argv = ['node', 'bin/ionic', 'update', 'foldername', '-w'];
 
       spyOn(fs, 'readFileSync').andReturn('{ "version": "2.0.0" }');
@@ -136,35 +130,28 @@ describe('Stats', function() {
       var mpSpy = jasmine.createSpy('mpSpy');
       var revertMpSpy = IonicStats.__set__('mp', mpSpy);
 
-      spyOn(IonicInfoModule, 'getNodeVersion');
-      spyOn(IonicInfoModule, 'getOsEnvironment');
-      spyOn(IonicInfoModule, 'gatherGulpInfo').andCallFake(function(info) {
-        info.os = 'Mac OS X El Capitan';
-        info.node = 'v5.10.1';
-        info.gulp = 'v3.0.0';
-      });
-
-      var configSpy = jasmine.createSpyObj('ionicConfig', ['get']);
-      configSpy.get.andReturn(false);
-
-      var revertConfig = IonicStats.__set__('ionicConfig', configSpy);
-
-      IonicStats.t();
-
-      expect(mpSpy).toHaveBeenCalledWith('update', {
+      spyOn(IonicInfoModule, 'gatherInfo').andReturn(Q({
         ionic_version: '2.0.0', // eslint-disable-line camelcase
         cli_version: '2.0.0', // eslint-disable-line camelcase
-        email: false,
-        account_id: false, // eslint-disable-line camelcase
-        /*
         os: 'Mac OS X El Capitan',
-        gulp: 'v3.0.0',
-        node: 'v5.10.1',
-        */
-        '--no-cordova': true
+        node: 'v5.10.1'
+      }));
+
+      var config = {
+        get: function() { return false; }
+      };
+
+      spyOn(IonicConfig, 'promiseLoad').andReturn(Q(config));
+
+      IonicStats.t().then(function() {
+        expect(mpSpy).toHaveBeenCalledWith('update', {
+          email: false,
+          account_id: false, // eslint-disable-line camelcase
+          '--no-cordova': true
+        });
+        revertMpSpy();
+        done();
       });
-      revertMpSpy();
-      revertConfig();
     });
   });
 
